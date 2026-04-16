@@ -1,77 +1,76 @@
 # vaultdb-encryption
 
-Public audit module for [VaultDB](https://vaultdb.com.br) — the database backup service with BYOK (Bring Your Own Key) encryption.
+Public audit repository for [VaultDB](https://vaultdb.com.br) cryptographic modules.
 
-This repository contains the **complete encryption module** extracted from the VaultDB codebase. It is published separately so anyone can audit, fork and compile the cryptographic layer independently, without needing access to the full product.
+This repo contains the **production source code** of the encryption layer used by VaultDB Cloud and the open-source agent. It is published separately so anyone can audit, fork, and compile the cryptographic components independently.
 
-## What this module does
+## Repository structure
 
-- **AES-256-GCM file encryption** with random IV per file and authentication tags (`services/encryption.service.ts`)
-- **BYOK key management** — customer keys are cached in RAM only, never persisted (`providers/direct-key.provider.ts`)
-- **Key derivation** via PBKDF2 (100,000 iterations, SHA-512) (`providers/direct-key.provider.ts`)
-- **Key wrapping** — per-organization keys are wrapped with the customer's key before storage (`providers/direct-key.provider.ts`)
-- **Key rotation** with zero-downtime — old keys remain valid for existing backups (`services/key-rotation.service.ts`)
-- **Key expiration monitoring** with configurable alerts (`services/key-expiration-monitor.service.ts`)
-- **Field-level encryption** for sensitive database fields (`services/field-encryption.service.ts`)
-- **Cloud KMS providers** for AWS KMS, GCP KMS and Azure Key Vault (`providers/aws-kms.provider.ts`, `providers/gcp-kms.provider.ts`, `providers/azure-kms.provider.ts`)
-- **Managed key provider** for platform-managed encryption when BYOK is not enabled (`providers/managed-key.provider.ts`)
+```
+libs/
+├── encryption/          # Core encryption library
+│   └── src/
+│       ├── services/    # AES-256-GCM, key management, rotation, field encryption
+│       ├── providers/   # BYOK (DirectKey), ManagedKey, AWS KMS, GCP KMS, Azure KV
+│       ├── schemas/     # Mongoose schemas (OrganizationKey, KeyAlertHistory)
+│       ├── interfaces/  # TypeScript contracts
+│       ├── errors/      # Custom error types
+│       └── utils/       # Restore key resolver, BYOK backfill
+└── checksum/            # File integrity verification
+    └── src/
+        └── checksum.utils.ts
+```
 
-## Key security claims (and how to verify them)
+## Security claims — where to verify
 
-| Claim | File to audit | What to look for |
+| Claim | File | What to look for |
 |---|---|---|
-| AES-256-GCM is the only algorithm | `services/encryption.service.ts` | `const ALGORITHM = 'aes-256-gcm'` — hardcoded, not configurable |
-| IV is random per file | `services/encryption.service.ts` | `crypto.randomBytes(IV_LENGTH)` called in `encryptFile` |
-| Customer key never touches disk | `providers/direct-key.provider.ts` | `keyCache` is a `Map<string, Buffer>` in RAM; no `fs.write` anywhere |
-| Key length enforced at 32 bytes | `providers/direct-key.provider.ts` | `customerKeyHex.length !== 64` check in `cacheCustomerKey` |
-| PBKDF2 iterations are high enough | `providers/direct-key.provider.ts` | `PBKDF2_ITERATIONS = 100_000` |
+| AES-256-GCM only | `libs/encryption/src/services/encryption.service.ts` | `const ALGORITHM = 'aes-256-gcm'` — hardcoded |
+| Random IV per file | `libs/encryption/src/services/encryption.service.ts` | `crypto.randomBytes(IV_LENGTH)` in `encryptFile` |
+| Customer key never on disk | `libs/encryption/src/providers/direct-key.provider.ts` | `keyCache = new Map<string, Buffer>()` in RAM; no `fs.write` |
+| Key length = 32 bytes | `libs/encryption/src/providers/direct-key.provider.ts` | `customerKeyHex.length !== 64` guard |
+| PBKDF2 100k iterations | `libs/encryption/src/providers/direct-key.provider.ts` | `PBKDF2_ITERATIONS = 100_000` |
+| Auth tag verified on decrypt | `libs/encryption/src/services/encryption.service.ts` | `decipher.setAuthTag(authTag)` |
 
-## Directory structure
+## Modules
 
-```
-.
-├── encryption.module.ts        # NestJS module wiring
-├── index.ts                    # Public API barrel
-├── interfaces/
-│   └── encryption.interface.ts # Types and contracts
-├── providers/
-│   ├── direct-key.provider.ts  # BYOK — the main audit target
-│   ├── managed-key.provider.ts # Platform-managed key (fallback)
-│   ├── aws-kms.provider.ts     # AWS KMS integration
-│   ├── gcp-kms.provider.ts     # GCP Cloud KMS integration
-│   ├── azure-kms.provider.ts   # Azure Key Vault integration
-│   └── *.spec.ts               # Unit tests for each provider
-├── services/
-│   ├── encryption.service.ts   # Core AES-256-GCM file encryption
-│   ├── key-management.service.ts
-│   ├── key-rotation.service.ts
-│   ├── key-expiration-monitor.service.ts
-│   ├── field-encryption.service.ts
-│   ├── cron-metric.util.ts
-│   └── *.spec.ts               # Unit tests
-├── schemas/                    # Mongoose schemas for key storage
-├── errors/                     # Custom error types
-└── utils/                      # Restore key resolver, BYOK backfill
-```
+### `libs/encryption`
 
-## Running the tests
+The core library. Contains:
+
+- **EncryptionService** — AES-256-GCM file encryption with streaming (plaintext never hits disk as a separate file), string encryption for field-level use.
+- **DirectKeyProvider (BYOK)** — customer-supplied key, cached in RAM, PBKDF2-derived KEK wraps the per-org key. The wrapped key is the only thing VaultDB Cloud stores.
+- **ManagedKeyProvider** — platform-managed fallback when BYOK is not enabled.
+- **AWS/GCP/Azure KMS providers** — delegate key wrapping to cloud HSMs.
+- **KeyManagementService** — orchestrates key creation, caching, and provider selection.
+- **KeyRotationService** — zero-downtime rotation; old key stays valid for existing backups.
+- **KeyExpirationMonitorService** — alerts when keys approach expiration.
+- **FieldEncryptionService** — encrypts/decrypts individual document fields at rest.
+
+### `libs/checksum`
+
+SHA-256 file checksums used to verify backup integrity after encryption and transfer.
+
+## Running tests
 
 ```bash
-# Install dependencies (this module is part of a NestJS monorepo)
+# From the repo root
 npm install
-
-# Run all encryption tests
-npx jest --testPathPattern='(encryption|direct-key|managed-key|key-rotation|key-management|field-encryption|key-expiration)' --no-cache
+npx jest --no-cache
 ```
 
-## Found a vulnerability?
+Tests cover every provider, every service, key rotation edge cases, and schema validation.
 
-Email **security@vaultdb.com.br** — we take every report seriously and respond within 24 hours. Please do not open a public issue for security vulnerabilities.
+## Relationship to the VaultDB product
+
+This module is extracted from the [VaultDB monorepo](https://vaultdb.com.br). The full product (API, worker, site, admin, agent) is proprietary. Only the cryptographic layer is published here for transparency.
+
+The module is kept in sync with production. When VaultDB ships a new encryption feature or fix, this repo is updated.
+
+## Vulnerability disclosure
+
+Email **security@vaultdb.com.br** — we respond within 24 hours. Do not open public issues for security vulnerabilities.
 
 ## License
 
 [MIT](LICENSE)
-
----
-
-This module is extracted from the [VaultDB](https://vaultdb.com.br) monorepo. The full product (API, worker, UI, agent) is proprietary; this encryption layer is published for transparency and independent audit.
