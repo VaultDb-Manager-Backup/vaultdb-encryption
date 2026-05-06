@@ -201,6 +201,13 @@ export class KeyExpirationMonitorService implements OnModuleInit {
       this.logger.error(`Expiration check cron crashed: ${message}`);
       failures.push({ organization_id: '__cron__', error: message });
     } finally {
+      // BYOK-091 refinement: reminders/warnings/critical are NOT cron
+      // failures. They are operator-attention signals (keys nearing
+      // rotation). Folding them into `failed` made the BYOK health
+      // dashboard report FALHOU on every healthy run that found a
+      // single key in the warning window. We keep `failed` strictly
+      // for exceptions and surface attention items in their own
+      // counter for the dashboard.
       await emitCronMetric(
         {
           subsystem: 'byok',
@@ -211,7 +218,8 @@ export class KeyExpirationMonitorService implements OnModuleInit {
             healthy + reminders + warnings + critical + failures.length,
           succeeded: healthy,
           skipped: 0,
-          failed: reminders + warnings + critical + failures.length,
+          attention: reminders + warnings + critical,
+          failed: failures.length,
           failures,
         },
         this.cronRunLogModel,

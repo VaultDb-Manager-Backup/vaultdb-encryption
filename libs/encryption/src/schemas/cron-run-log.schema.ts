@@ -56,6 +56,17 @@ export class CronRunLog {
   @Prop({ type: Number, required: true, default: 0 })
   failed: number;
 
+  /**
+   * BYOK-091 follow-up: items that need operator attention but are NOT
+   * exceptions (e.g. keys nearing rotation deadline). Folded into a
+   * dedicated counter instead of `failed` so dashboards can distinguish
+   * "the cron is broken" from "the cron is doing its job and found work".
+   * Optional and defaults to 0 for backward compatibility with rows
+   * persisted before this field existed.
+   */
+  @Prop({ type: Number, required: false, default: 0 })
+  attention: number;
+
   @Prop({
     type: [
       {

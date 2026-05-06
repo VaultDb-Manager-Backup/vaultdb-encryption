@@ -71,6 +71,8 @@ describe('KeyExpirationMonitorService', () => {
       get: jest.fn().mockReturnValue(undefined),
     };
 
+    const mockCronRegistry = { register: jest.fn().mockResolvedValue(undefined) };
+
     service = new KeyExpirationMonitorService(
       mockOrgKeyModel,
       mockCronRunLogModel as any,
@@ -79,6 +81,7 @@ describe('KeyExpirationMonitorService', () => {
       mockOrganizationMemberModel as any,
       mockEmailService as any,
       mockConfigService as any,
+      mockCronRegistry as any,
     );
   });
 
@@ -98,17 +101,45 @@ describe('KeyExpirationMonitorService', () => {
       expect(metric.subsystem).toBe('byok');
       expect(metric.job).toBe('key_expiration_monitor');
       expect(metric.succeeded).toBe(1); // 1 healthy
-      expect(metric.failed).toBe(1); // 1 critical folded in
+      expect(metric.attention).toBe(1); // 1 critical surfaced as attention
+      expect(metric.failed).toBe(0); // no exceptions
       expect(metric.processed).toBe(2);
     });
 
-    it('emits a cron metric even when checkKeyAges throws', async () => {
+    it('keeps failed at 0 when only reminders/warnings/critical are present (no exceptions)', async () => {
+      // Three keys: one in each non-healthy bucket (reminder ~76d, warning ~85d, critical ~95d)
+      const today = new Date();
+      const reminderDate = new Date(today);
+      reminderDate.setDate(today.getDate() - 76);
+      const warningDate = new Date(today);
+      warningDate.setDate(today.getDate() - 85);
+      const criticalDate = new Date(today);
+      criticalDate.setDate(today.getDate() - 95);
+
+      mockOrgKeyModel.find.mockResolvedValue([
+        makeKeyRecord({ rotated_at: reminderDate }),
+        makeKeyRecord({ rotated_at: warningDate }),
+        makeKeyRecord({ rotated_at: criticalDate }),
+      ]);
+
+      await service.handleExpirationCheckCron();
+
+      const metric = mockCronRunLogModel.create.mock.calls[0][0];
+      expect(metric.succeeded).toBe(0);
+      expect(metric.attention).toBe(3);
+      expect(metric.failed).toBe(0);
+      expect(metric.processed).toBe(3);
+    });
+
+    it('emits a cron metric and marks failed > 0 only when checkKeyAges throws', async () => {
       mockOrgKeyModel.find.mockRejectedValue(new Error('db unreachable'));
 
       await service.handleExpirationCheckCron();
 
       expect(mockCronRunLogModel.create).toHaveBeenCalledTimes(1);
       const metric = mockCronRunLogModel.create.mock.calls[0][0];
+      expect(metric.failed).toBe(1);
+      expect(metric.attention).toBe(0);
       expect(metric.failures).toHaveLength(1);
       expect(metric.failures[0].organization_id).toBe('__cron__');
       expect(metric.failures[0].error).toContain('db unreachable');

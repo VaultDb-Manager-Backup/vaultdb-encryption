@@ -30,6 +30,12 @@ export interface CronMetricParams {
   succeeded: number;
   skipped: number;
   failed: number;
+  /**
+   * Optional non-failure attention counter. Used by jobs that surface
+   * "needs eyes" items (e.g. keys nearing rotation) without conflating
+   * them with cron-level exceptions. Defaults to 0 when omitted.
+   */
+  attention?: number;
   failures?: CronFailureEntry[];
 }
 
@@ -53,6 +59,8 @@ export async function emitCronMetric(
   const duration_ms =
     params.finished_at.getTime() - params.started_at.getTime();
 
+  const attention = params.attention ?? 0;
+
   const payload = {
     subsystem: params.subsystem,
     job: params.job,
@@ -63,6 +71,7 @@ export async function emitCronMetric(
     succeeded: params.succeeded,
     skipped: params.skipped,
     failed: params.failed,
+    attention,
     failures: params.failures ?? [],
   };
 
@@ -81,6 +90,7 @@ export async function emitCronMetric(
       succeeded: params.succeeded,
       skipped: params.skipped,
       failed: params.failed,
+      attention,
       failures: params.failures ?? [],
     });
   } catch (err) {
