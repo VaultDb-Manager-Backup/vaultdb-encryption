@@ -126,7 +126,13 @@ export class KeyRotationService implements OnModuleInit {
       this.configService.get<number>('BYOK_AUTO_ROTATION_MAX_PER_RUN') ??
       DEFAULT_MAX_PER_RUN;
 
-    const allKeys = await this.organizationKeyModel.find({ auto_rotate: true });
+    // Managed keys ALWAYS auto-rotate — they're VaultDB-internal infra and
+    // customers never opted in/out of rotation. We previously gated all
+    // rotation behind `auto_rotate: true`, which left managed keys aging
+    // forever and triggered the (now-suppressed) expiration emails.
+    const allKeys = await this.organizationKeyModel.find({
+      $or: [{ auto_rotate: true }, { key_type: 'managed' }],
+    });
     const keys = allKeys.slice(0, maxPerRun);
     const deferred = allKeys.length - keys.length;
 

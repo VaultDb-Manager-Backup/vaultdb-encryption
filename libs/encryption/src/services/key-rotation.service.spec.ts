@@ -195,9 +195,13 @@ describe('KeyRotationService', () => {
       expect(results.rotated).toBe(1);
     });
 
-    it('only queries keys with auto_rotate=true', async () => {
+    it('queries keys with auto_rotate=true OR key_type=managed', async () => {
+      // Managed keys are VaultDB-internal infra and rotate silently
+      // regardless of the customer-facing auto_rotate flag.
       await service.handleAutoRotation();
-      expect(mockOrgKeyModel.find).toHaveBeenCalledWith({ auto_rotate: true });
+      expect(mockOrgKeyModel.find).toHaveBeenCalledWith({
+        $or: [{ auto_rotate: true }, { key_type: 'managed' }],
+      });
     });
   });
 

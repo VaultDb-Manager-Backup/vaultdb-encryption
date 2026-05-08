@@ -229,7 +229,13 @@ export class KeyExpirationMonitorService implements OnModuleInit {
   }
 
   async checkKeyAges(): Promise<KeyAgeCheckResult> {
-    const keys = await this.organizationKeyModel.find();
+    // Managed keys are VaultDB-internal infra. Customers never configured
+    // them, so reminding them to "rotate the key" is noise — and worse,
+    // the rotate-now button leads them to a settings page that does not
+    // apply. The auto-rotation cron handles managed keys silently.
+    const keys = await this.organizationKeyModel.find({
+      key_type: { $ne: 'managed' },
+    });
     const { reminderPct, warningPct, criticalPct } = this.readThresholds();
 
     let healthy = 0;

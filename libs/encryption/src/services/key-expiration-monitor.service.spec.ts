@@ -217,6 +217,16 @@ describe('KeyExpirationMonitorService', () => {
       expect(results.healthy).toBe(0);
     });
 
+    it('skips managed keys via the find filter (no expiration emails for managed)', async () => {
+      mockOrgKeyModel.find.mockResolvedValue([]);
+
+      await service.checkKeyAges();
+
+      expect(mockOrgKeyModel.find).toHaveBeenCalledWith({
+        key_type: { $ne: 'managed' },
+      });
+    });
+
     it('should categorize multiple keys correctly', async () => {
       const now = new Date();
       const days30Ago = new Date(now);
