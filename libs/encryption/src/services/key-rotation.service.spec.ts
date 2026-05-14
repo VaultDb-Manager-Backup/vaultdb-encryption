@@ -51,7 +51,9 @@ describe('KeyRotationService', () => {
       get: jest.fn().mockReturnValue(undefined),
     };
     mockCronRunLogModel = { create: jest.fn().mockResolvedValue({}) };
-    const mockCronRegistry = { register: jest.fn().mockResolvedValue(undefined) };
+    const mockCronRegistry = {
+      register: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new KeyRotationService(
       mockOrgKeyModel as any,

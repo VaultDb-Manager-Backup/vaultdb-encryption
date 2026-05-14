@@ -71,7 +71,9 @@ describe('KeyExpirationMonitorService', () => {
       get: jest.fn().mockReturnValue(undefined),
     };
 
-    const mockCronRegistry = { register: jest.fn().mockResolvedValue(undefined) };
+    const mockCronRegistry = {
+      register: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new KeyExpirationMonitorService(
       mockOrgKeyModel,
