@@ -55,8 +55,14 @@ export class FieldEncryptionService {
       throw new Error('Invalid encrypted field');
     }
 
-    const key =
-      await this.keyManagementService.getOrganizationKey(organizationId);
+    // The version the field was sealed with, not the current one. After a
+    // BYOK rotation the current key cannot verify an older auth tag, so
+    // ignoring this makes every credential saved before the rotation fail to
+    // decrypt — which is exactly what `version` exists to prevent.
+    const key = await this.keyManagementService.getOrganizationKey(
+      organizationId,
+      encryptedField.version,
+    );
 
     return this.encryptionService.decryptString(
       encryptedField.value,

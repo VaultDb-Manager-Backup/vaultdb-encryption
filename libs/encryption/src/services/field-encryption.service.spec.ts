@@ -77,8 +77,11 @@ describe('FieldEncryptionService', () => {
 
       const result = await service.decryptField(encryptedField, orgId);
 
+      // With the field's own version: the current key cannot verify a tag
+      // sealed by an older one.
       expect(mockKeyManagementService.getOrganizationKey).toHaveBeenCalledWith(
         orgId,
+        1,
       );
       expect(mockEncryptionService.decryptString).toHaveBeenCalledWith(
         'encryptedBase64',
@@ -282,6 +285,50 @@ describe('FieldEncryptionService', () => {
 
       expect(service.isEncryptionAvailable()).toBe(true);
       expect(mockKeyManagementService.isEncryptionAvailable).toHaveBeenCalled();
+    });
+  });
+
+  describe('decryptField key version', () => {
+    const encrypted = (version: number) => ({
+      value: 'cipher',
+      iv: 'iv',
+      authTag: 'tag',
+      version,
+    });
+
+    beforeEach(() => {
+      mockEncryptionService.decryptString.mockReturnValue('plain');
+    });
+
+    it('asks for the key version the field was encrypted with', async () => {
+      // After a BYOK rotation the current key cannot verify a field sealed
+      // with an older one: every saved credential stops decrypting.
+      await service.decryptField(encrypted(2), orgId);
+
+      expect(mockKeyManagementService.getOrganizationKey).toHaveBeenCalledWith(
+        orgId,
+        2,
+      );
+    });
+
+    it('still works for a field written before versions were recorded', async () => {
+      const legacy = { value: 'cipher', iv: 'iv', authTag: 'tag' };
+
+      await service.decryptField(legacy as never, orgId);
+
+      expect(mockKeyManagementService.getOrganizationKey).toHaveBeenCalledWith(
+        orgId,
+        undefined,
+      );
+    });
+
+    it('does not treat version 0 as absent', async () => {
+      await service.decryptField(encrypted(0), orgId);
+
+      expect(mockKeyManagementService.getOrganizationKey).toHaveBeenCalledWith(
+        orgId,
+        0,
+      );
     });
   });
 });
